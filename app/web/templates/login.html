@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Login - NPM Certificate Manager{% endblock %}
+{% block content %}
+<section class="login-box">
+  <h2>Login</h2>
+  <p class="hint">
+    Log in using your existing Nginx Proxy Manager credentials.
+    The Certificate Manager does not have its own user management system.
+  </p>
+  {% if error %}
+  <p class="error">{{ error }}</p>
+  {% endif %}
+  <form method="post" action="/login">
+    <label for="identity">E-Mail (NPM Identity)</label>
+    <input type="email" id="identity" name="identity" required autofocus>
+
+    <label for="secret">Password</label>
+    <input type="password" id="secret" name="secret" required>
+
+    <button type="submit">Login</button>
+  </form>
+</section>
+{% endblock %}

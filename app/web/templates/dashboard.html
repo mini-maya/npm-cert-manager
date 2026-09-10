@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Certificate Manager{% endblock %}
+{% block content %}
+
+<div class="toolbar">
+  <span id="npm-status" hx-get="/health-status" hx-trigger="load, every 60s" hx-swap="innerHTML">
+    NPM Status: checking...
+  </span>
+  <button hx-post="/api/sync" hx-target="body" hx-swap="none" onclick="setTimeout(() => location.reload(), 500)">
+    Manual Sync
+  </button>
+  {% if not ca_ready %}
+  <button type="button" onclick="document.getElementById('ca-dialog').showModal()">
+    Generate Root CA
+  </button>
+  {% endif %}
+  {% if ca_ready %}
+  <button type="button" onclick="document.getElementById('cert-dialog').showModal()">
+    Generate Certificate
+  </button>
+  {% endif %}
+  <form method="post" action="/logout" style="display:inline">
+    <button type="submit">Logout</button>
+  </form>
+</div>
+
+{% if not ca_ready %}
+<dialog id="ca-dialog">
+  <form hx-post="/api/ca/init" hx-target="body" hx-swap="none" onsubmit="setTimeout(() => location.reload(), 400)">
+    <h3>Generate Root CA</h3>
+    <label>Common Name
+      <input type="text" name="common_name" value="Local Docker Root CA" required>
+    </label>
+    <label>Validity in days
+      <input type="number" name="valid_days" value="825" min="1" max="36500" required>
+    </label>
+    <div class="dialog-actions">
+      <button type="submit">Generate Root CA</button>
+      <button type="button" onclick="document.getElementById('ca-dialog').close()">Cancel</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+
+{% if ca_ready %}
+<dialog id="cert-dialog">
+  <form method="post" action="/api/certificates/generate" enctype="application/x-www-form-urlencoded">
+    <h3>Generate new certificate with Root CA</h3>
+    <label>Common Name
+      <input type="text" name="common_name" value="example.lan" required>
+    </label>
+    <label>SANs (DNS / IP separated by comma)
+      <textarea name="sans" rows="4" required>example.lan, www.example.lan, 192.168.1.50</textarea>
+    </label>
+    <label>Validity in days
+      <input type="number" name="days" value="825" min="1" max="3980" required>
+    </label>
+    <div class="dialog-actions">
+      <button type="submit">Generate & download</button>
+      <button type="button" onclick="document.getElementById('cert-dialog').close()">Cancel</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+
+{% if not ca_ready %}
+<div class="banner banner-warning">
+  No Root CA has been generated yet. Click <strong>Generate Root CA</strong> to automatically create a new
+  <code>ca.key</code> and <code>ca.crt</code> in the configured secret directory.
+</div>
+{% endif %}
+
+{% if any_reload_required %}
+<div class="banner banner-warning">
+  At least one certificate has been renewed. Please restart or reload Nginx Proxy Manager once so the change takes effect.
+  The Certificate Manager intentionally does not trigger an automatic reload for security and architecture reasons
+  <strong>(see README)</strong>.
+</div>
+{% endif %}
+
+{% set all_cert_cards = [] %}
+{% for cert in unmapped %}
+{% set _ = all_cert_cards.append({"type": "unmapped", "title": cert.nice_name or (cert.domain_names[0] if cert.domain_names else 'Unnamed'), "content": cert, "color": "grey"}) %}
+{% endfor %}
+{% for row in rows %}
+{% set _ = all_cert_cards.append({"type": "managed", "title": row.meta.name, "content": row, "color": row.color}) %}
+{% endfor %}
+
+{% if all_cert_cards %}
+<table class="cert-table sortable-table">
+  <thead>
+    <tr>
+      <th><button type="button" class="sort-button" data-sort="name">Name</button></th>
+      <th><button type="button" class="sort-button" data-sort="type">Type</button></th>
+      <th><button type="button" class="sort-button" data-sort="expires">Expiry</button></th>
+      <th><button type="button" class="sort-button" data-sort="remaining">Remaining</button></th>
+      <th><button type="button" class="sort-button" data-sort="status">Status</button></th>
+      <th><button type="button" class="sort-button" data-sort="id">NPM Cert ID</button></th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for card in all_cert_cards %}
+    {% set expiry_value = card.content.expires_on if card.type == "unmapped" else card.content.meta.cached_expires_at %}
+    {% set status_text = "Unmapped" if card.type == "unmapped" else ("OK" if card.color == "green" else "Renewal soon" if card.color == "orange" else "Expired / failed" if card.color == "red" else "Unknown") %}
+    {% set status_sort = 4 if card.type == "unmapped" else (1 if card.color == "green" else 2 if card.color == "orange" else 3 if card.color == "red" else 5) %}
+    {% set remaining_raw = card.content.remaining_days if card.type == "managed" and card.content.remaining_days is not none else 999999 %}
+    {% set cert_id = card.content.id if card.type == "unmapped" else card.content.meta.npm_certificate_id %}
+    <tr class="cert-row cert-{{ card.color }}" data-name="{{ card.title | e }}" data-type="{{ 'unmapped' if card.type == 'unmapped' else 'managed' }}" data-expires="{{ expiry_value or '9999-12-31' }}" data-remaining="{{ remaining_raw }}" data-status="{{ status_sort }}" data-id="{{ cert_id }}">
+      <td class="name-cell">{{ card.title }}</td>
+      <td>{{ 'Unmapped' if card.type == "unmapped" else 'Managed' }}</td>
+      <td>{{ expiry_value or 'unknown' }}</td>
+      <td>
+        {% if card.type == "managed" %}
+          {{ card.content.remaining_days if card.content.remaining_days is not none else '?' }}{% if card.content.remaining_days is not none %} days{% endif %}
+        {% else %}
+          —
+        {% endif %}
+      </td>
+      <td><span class="status-pill status-{{ card.color }}">{{ status_text }}</span></td>
+      <td>{{ cert_id }}</td>
+      <td class="action-cell">
+        {% if card.type == "unmapped" %}
+        <form method="post" action="/map-certificate">
+          <input type="hidden" name="npm_certificate_id" value="{{ card.content.id }}">
+          <input type="hidden" name="name" value="{{ card.content.nice_name or (card.content.domain_names[0] if card.content.domain_names else 'custom-cert') }}">
+          <input type="hidden" name="identities" value="{{ card.content.domain_names | join(',') }}">
+          <button type="submit">Import into UI</button>
+        </form>
+        {% else %}
+        <div class="action-stack">
+          {% if card.content.meta.last_renewal_error %}
+          <div class="error">Last error: {{ card.content.meta.last_renewal_error }}</div>
+          {% endif %}
+          {% if card.content.meta.reload_required %}
+          <div class="warning">
+            Reload pending since {{ card.content.meta.reload_required_since }}.
+            <button hx-post="/api/certificates/{{ card.content.meta.local_id }}/acknowledge-reload" hx-target="body" hx-swap="none" onclick="setTimeout(() => location.reload(), 300)">
+              Mark as done
+            </button>
+          </div>
+          {% endif %}
+          <button type="button" onclick="document.getElementById('renew-dialog-{{ card.content.meta.local_id }}').showModal()">
+            Renew
+          </button>
+        </div>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% for card in all_cert_cards %}
+{% if card.type == "managed" %}
+<dialog id="renew-dialog-{{ card.content.meta.local_id }}">
+  <form hx-post="/api/certificates/{{ card.content.meta.local_id }}/renew" hx-target="body" hx-swap="none" onsubmit="setTimeout(() => location.reload(), 500)">
+    <h3>Renew certificate</h3>
+    <label>Validity in days
+      <input type="number" name="valid_days" value="825" min="1" max="3980" required>
+    </label>
+    <div class="dialog-actions">
+      <button type="submit">Renew</button>
+      <button type="button" onclick="document.getElementById('renew-dialog-{{ card.content.meta.local_id }}').close()">Cancel</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+{% endfor %}
+{% else %}
+<p>No managed certificates available. Use "Manual Sync" to discover existing custom certificates from NPM.</p>
+{% endif %}
+
+<script>
+  (function () {
+    const tables = document.querySelectorAll('.sortable-table');
+
+    tables.forEach((table) => {
+      const tbody = table.querySelector('tbody');
+      const buttons = table.querySelectorAll('.sort-button');
+
+      const sortRows = (key, dir = 'asc') => {
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort((a, b) => {
+          const left = (a.dataset[key] ?? '').toString();
+          const right = (b.dataset[key] ?? '').toString();
+          const leftNum = Number(left);
+          const rightNum = Number(right);
+          const isNumeric = Number.isFinite(leftNum) && Number.isFinite(rightNum);
+
+          let result = 0;
+          if (isNumeric) {
+            result = leftNum - rightNum;
+          } else {
+            result = left.localeCompare(right, undefined, { sensitivity: 'base' });
+          }
+
+          return dir === 'asc' ? result : -result;
+        });
+
+        rows.forEach((row) => tbody.appendChild(row));
+      };
+
+      let currentKey = 'remaining';
+      let currentDir = 'asc';
+
+      const updateButtonState = (selectedButton) => {
+        buttons.forEach((button) => {
+          const isActive = button === selectedButton;
+          button.classList.toggle('active', isActive);
+          button.setAttribute('aria-pressed', String(isActive));
+        });
+      };
+
+      buttons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const key = button.dataset.sort;
+
+          if (currentKey === key) {
+            currentDir = currentDir === 'asc' ? 'desc' : 'asc';
+          } else {
+            currentKey = key;
+            currentDir = ['name', 'type', 'status'].includes(key) ? 'asc' : 'desc';
+          }
+
+          updateButtonState(button);
+          sortRows(currentKey, currentDir);
+        });
+      });
+
+      const initialButton = table.querySelector('[data-sort="remaining"]');
+      if (initialButton) {
+        updateButtonState(initialButton);
+        sortRows(currentKey, currentDir);
+      }
+    });
+  })();
+</script>
+
+{% endblock %}

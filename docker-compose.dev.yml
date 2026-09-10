@@ -1,0 +1,47 @@
+version: "3.9"
+
+services:
+  nginx-proxy-manager:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: nginx-proxy-manager-dev
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "81:81"
+      - "443:443"
+    volumes:
+      - ./dev-data:/data
+      - ./dev-ssl:/etc/letsencrypt
+    environment:
+      DB_SQLITE_FILE: "/data/database.sqlite"
+    networks:
+      - npm-cert-manager-dev
+
+  cert-manager:
+    build: .
+    container_name: npm-cert-manager-dev
+    restart: unless-stopped
+    ports:
+      - "8080:8000"
+    environment:
+      NPM_URL: "http://nginx-proxy-manager:81/api"
+      NPM_SERVICE_IDENTITY: "${NPM_SERVICE_IDENTITY:-admin@example.com}"
+      NPM_SERVICE_SECRET: "${NPM_SERVICE_SECRET:-changeme}"
+      RENEW_BEFORE_DAYS: "30"
+      CHECK_INTERVAL_SECONDS: "60"
+      SESSION_SECRET: "${SESSION_SECRET:-dev-secret}"
+      SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-false}"
+      DATA_DIR: "/app/data"
+      CA_KEY_PATH: "/app/secrets/ca.key"
+      CA_CERT_PATH: "/app/secrets/ca.crt"
+    volumes:
+      - ./data:/app/data
+      - ./secrets:/app/secrets
+    depends_on:
+      - nginx-proxy-manager
+    networks:
+      - npm-cert-manager-dev
+
+networks:
+  npm-cert-manager-dev:
+    driver: bridge

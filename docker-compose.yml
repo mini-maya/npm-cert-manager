@@ -1,0 +1,39 @@
+version: "3.9"
+
+services:
+  cert-manager:
+    build: .
+    container_name: npm-cert-manager
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8080:8000"
+    environment:
+      NPM_URL: "http://nginx-proxy-manager:81/api"
+      NPM_SERVICE_IDENTITY: "${NPM_SERVICE_IDENTITY:-}"
+      NPM_SERVICE_SECRET: "${NPM_SERVICE_SECRET:-}"
+      RENEW_BEFORE_DAYS: "30"
+      CHECK_INTERVAL_SECONDS: "21600"
+      KEY_SIZE: "2048"
+      KEY_TYPE: "rsa"
+      SESSION_SECRET: "${SESSION_SECRET:-change-me}"
+      SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-true}"
+      DATA_DIR: "/app/data"
+      CA_KEY_PATH: "/app/secrets/ca.key"
+      CA_CERT_PATH: "/app/secrets/ca.crt"
+    volumes:
+      - ./data:/app/data
+      - ./secrets:/app/secrets
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - npm-net
+
+networks:
+  npm-net:
+    external: true
+    name: npm_default
