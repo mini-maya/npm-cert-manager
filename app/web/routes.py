@@ -6,6 +6,7 @@ app.storage / app.npm. Routes here only fetch data and render templates.
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Cookie, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -21,6 +22,19 @@ from app.web.auth import session_store
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+
+
+def _expires_to_days(expires_on: str | None) -> int | None:
+    """Convert an ISO expiry string (NPM style) to remaining days or None."""
+    if not expires_on:
+        return None
+    exp_raw = expires_on.replace("Z", "+00:00")
+    exp = datetime.fromisoformat(exp_raw)
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    return (exp.astimezone(timezone.utc) - now).days
+
 
 
 def _current_session_id(session_id: str | None) -> str | None:
@@ -82,6 +96,7 @@ def dashboard(
                     "nice_name": cert.nice_name,
                     "domain_names": cert.domain_names,
                     "expires_on": cert.expires_on,
+                    "remaining_days": _expires_to_days(cert.expires_on),
                 }
                 for cert in unmapped
             ],

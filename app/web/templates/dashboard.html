@@ -103,17 +103,17 @@
   <tbody>
     {% for card in all_cert_cards %}
     {% set expiry_value = card.content.expires_on if card.type == "unmapped" else card.content.meta.cached_expires_at %}
-    {% set status_text = "Unmapped" if card.type == "unmapped" else ("OK" if card.color == "green" else "Renewal soon" if card.color == "orange" else "Expired / failed" if card.color == "red" else "Unknown") %}
+    {% set status_text = "Unmanaged" if card.type == "unmapped" else ("OK" if card.color == "green" else "Renewal soon" if card.color == "orange" else "Expired / failed" if card.color == "red" else "Unknown") %}
     {% set status_sort = 4 if card.type == "unmapped" else (1 if card.color == "green" else 2 if card.color == "orange" else 3 if card.color == "red" else 5) %}
-    {% set remaining_raw = card.content.remaining_days if card.type == "managed" and card.content.remaining_days is not none else 999999 %}
+    {% set remaining_raw = card.content.remaining_days if card.content.remaining_days is not none else 999999 %}
     {% set cert_id = card.content.id if card.type == "unmapped" else card.content.meta.npm_certificate_id %}
     <tr class="cert-row cert-{{ card.color }}" data-name="{{ card.title | e }}" data-type="{{ 'unmapped' if card.type == 'unmapped' else 'managed' }}" data-expires="{{ expiry_value or '9999-12-31' }}" data-remaining="{{ remaining_raw }}" data-status="{{ status_sort }}" data-id="{{ cert_id }}">
       <td class="name-cell">{{ card.title }}</td>
-      <td>{{ 'Unmapped' if card.type == "unmapped" else 'Managed' }}</td>
+      <td>{{ 'Unmanaged' if card.type == "unmapped" else 'Managed' }}</td>
       <td>{{ expiry_value or 'unknown' }}</td>
       <td>
-        {% if card.type == "managed" %}
-          {{ card.content.remaining_days if card.content.remaining_days is not none else '?' }}{% if card.content.remaining_days is not none %} days{% endif %}
+        {% if card.content.remaining_days is not none %}
+          {{ card.content.remaining_days }} days
         {% else %}
           —
         {% endif %}
