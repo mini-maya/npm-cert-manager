@@ -7,7 +7,7 @@
     NPM Status: checking...
   </span>
   <button hx-post="/api/sync" hx-target="body" hx-swap="none" onclick="setTimeout(() => location.reload(), 500)">
-    Manual Sync
+    Refresh
   </button>
   {% if not ca_ready %}
   <button type="button" onclick="document.getElementById('ca-dialog').showModal()">
@@ -96,6 +96,7 @@
       <th><button type="button" class="sort-button" data-sort="remaining">Remaining</button></th>
       <th><button type="button" class="sort-button" data-sort="status">Status</button></th>
       <th><button type="button" class="sort-button" data-sort="id">NPM Cert ID</button></th>
+      <th>Identities</th>
       <th>Actions</th>
     </tr>
   </thead>
@@ -119,13 +120,24 @@
       </td>
       <td><span class="status-pill status-{{ card.color }}">{{ status_text }}</span></td>
       <td>{{ cert_id }}</td>
+      <td class="identities-cell">
+        {% if card.type == "unmapped" %}
+          {{ card.content.domain_names | join(', ') }}
+        {% else %}
+          {% if card.content.meta.identities %}
+            {{ card.content.meta.identities | map(attribute='value') | join(', ') }}
+          {% else %}
+            {{ card.content.domain_names | join(', ') if card.content.domain_names else '' }}
+          {% endif %}
+        {% endif %}
+      </td>
       <td class="action-cell">
         {% if card.type == "unmapped" %}
         <form method="post" action="/map-certificate">
           <input type="hidden" name="npm_certificate_id" value="{{ card.content.id }}">
           <input type="hidden" name="name" value="{{ card.content.nice_name or (card.content.domain_names[0] if card.content.domain_names else 'custom-cert') }}">
           <input type="hidden" name="identities" value="{{ card.content.domain_names | join(',') }}">
-          <button type="submit">Import into UI</button>
+          <button type="submit">Manage</button>
         </form>
         {% else %}
         <div class="action-stack">
@@ -143,6 +155,7 @@
           <button type="button" onclick="document.getElementById('renew-dialog-{{ card.content.meta.local_id }}').showModal()">
             Renew
           </button>
+          <span hx-get="/api/certificates/{{ card.content.meta.local_id }}/status" hx-trigger="load" hx-swap="innerHTML"></span>
         </div>
         {% endif %}
       </td>
@@ -167,7 +180,7 @@
 {% endif %}
 {% endfor %}
 {% else %}
-<p>No managed certificates available. Use "Manual Sync" to discover existing custom certificates from NPM.</p>
+<p>No managed certificates available. Use "Refresh" to discover existing custom certificates from NPM.</p>
 {% endif %}
 
 <script>

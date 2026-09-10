@@ -5,7 +5,7 @@ branch). Only the fields actually used by this application are modelled.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class NpmTokenResponse(BaseModel):
@@ -20,6 +20,8 @@ class NpmTokenChallengeResponse(BaseModel):
 
 
 class NpmCertificate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     id: int
     provider: str
     nice_name: str
@@ -27,6 +29,3 @@ class NpmCertificate(BaseModel):
     expires_on: str | None = None
     created_on: str | None = None
     modified_on: str | None = None
-
-    class Config:
-        extra = "ignore"

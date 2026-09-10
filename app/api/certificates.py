@@ -5,10 +5,12 @@ import re
 import zipfile
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Response, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel
+from typing import Optional
 
 from app.api.deps import get_npm_client, require_session
+from app.npm.errors import NpmNotFoundError
 from app.certificates.ca import CaNotFoundError, CertificateAuthority, ensure_root_ca
 from app.certificates.generator import CertificateGenerationError, issue_certificate
 from app.certificates.validation import classify_and_validate
@@ -26,14 +28,14 @@ class CertificateOut(BaseModel):
     npm_certificate_id: int
     name: str
     identities: list[dict]
-    cached_expires_at: str | None
-    remaining_days: int | None
+    cached_expires_at: Optional[str]
+    remaining_days: Optional[int]
     renew_before_days: int
-    last_renewed_at: str | None
-    last_renewal_status: str | None
-    last_renewal_error: str | None
+    last_renewed_at: Optional[str]
+    last_renewal_status: Optional[str]
+    last_renewal_error: Optional[str]
     reload_required: bool
-    reload_required_since: str | None
+    reload_required_since: Optional[str]
 
 
 def _to_out(meta) -> CertificateOut:
@@ -53,21 +55,21 @@ def _to_out(meta) -> CertificateOut:
     )
 
 
-@router.get("/certificates", response_model=list[CertificateOut])
-def list_certificates(session_id: str = Depends(require_session)) -> list[CertificateOut]:
+@router.get("/certificates", response_model=list[CertificateOut], dependencies=[Depends(require_session)])
+def list_certificates() -> list[CertificateOut]:
     return [_to_out(m) for m in repo.list_certificates()]
 
 
-@router.get("/certificates/{local_id}", response_model=CertificateOut)
-def get_certificate(local_id: str, session_id: str = Depends(require_session)) -> CertificateOut:
+@router.get("/certificates/{local_id}", response_model=CertificateOut, dependencies=[Depends(require_session)])
+def get_certificate(local_id: str) -> CertificateOut:
     meta = repo.get_certificate(local_id)
     if meta is None:
         raise HTTPException(status_code=404, detail="Certificate mapping not found")
     return _to_out(meta)
 
 
-@router.get("/certificates/{local_id}/history")
-def get_history(local_id: str, session_id: str = Depends(require_session)) -> list[dict]:
+@router.get("/certificates/{local_id}/history", dependencies=[Depends(require_session)])
+def get_history(local_id: str) -> list[dict]:
     if repo.get_certificate(local_id) is None:
         raise HTTPException(status_code=404, detail="Certificate mapping not found")
     return [entry.model_dump() for entry in repo.read_history(local_id)]
@@ -94,16 +96,66 @@ def renew(
         client.close()
 
 
-@router.post("/certificates/{local_id}/acknowledge-reload", response_model=CertificateOut)
-def acknowledge(local_id: str, session_id: str = Depends(require_session)) -> CertificateOut:
+@router.post("/certificates/{local_id}/acknowledge-reload", response_model=CertificateOut, dependencies=[Depends(require_session)])
+def acknowledge(local_id: str) -> CertificateOut:
     try:
         return _to_out(acknowledge_reload(local_id))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.delete("/certificates/{local_id}", response_model=None, status_code=status.HTTP_204_NO_CONTENT)
-def delete_mapping(local_id: str, session_id: str = Depends(require_session)) -> None:
+@router.post("/certificates/{local_id}/prune", response_model=None, status_code=status.HTTP_204_NO_CONTENT)
+def prune(local_id: str, session_id: str = Depends(require_session)) -> None:
+    """Remove a local mapping if the corresponding certificate no longer
+    exists in Nginx Proxy Manager. This attempts to fetch the certificate from
+    NPM; if NPM returns 404 the local mapping is deleted. If the certificate
+    still exists, a 409 Conflict is returned.
+    """
+    meta = repo.get_certificate(local_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="Certificate mapping not found")
+
+    client = get_npm_client(session_id)
+    try:
+        # Try to fetch from NPM; if it exists, refuse to prune.
+        client.get_certificate(meta.npm_certificate_id)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Certificate still exists in NPM; cannot prune")
+    except NpmNotFoundError:
+        repo.delete_certificate(local_id)
+        return None
+    finally:
+        client.close()
+
+
+@router.get("/certificates/{local_id}/status")
+def certificate_status_fragment(local_id: str, session_id: str = Depends(require_session)) -> HTMLResponse:
+    """Return a small HTML fragment indicating whether a Prune action is
+    applicable for this local mapping. If the certificate is missing in NPM,
+    an HTML button is returned so the dashboard can swap it into place via HTMX.
+    """
+    meta = repo.get_certificate(local_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="Certificate mapping not found")
+
+    client = get_npm_client(session_id)
+    try:
+        try:
+            client.get_certificate(meta.npm_certificate_id)
+            # Certificate exists -> no prune UI
+            return HTMLResponse("")
+        except NpmNotFoundError:
+            btn = (
+                f'<button hx-post="/api/certificates/{local_id}/prune" '
+                'hx-target="body" hx-swap="none" '
+                'onclick="setTimeout(() => location.reload(), 300)">Prune</button>'
+            )
+            return HTMLResponse(btn)
+    finally:
+        client.close()
+
+
+@router.delete("/certificates/{local_id}", response_model=None, status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_session)])
+def delete_mapping(local_id: str) -> None:
     if repo.get_certificate(local_id) is None:
         raise HTTPException(status_code=404, detail="Certificate mapping not found")
     repo.delete_certificate(local_id)
@@ -117,8 +169,8 @@ class CreateMappingIn(BaseModel):
     renew_before_days: int = 30
 
 
-@router.post("/certificates", response_model=CertificateOut, status_code=status.HTTP_201_CREATED)
-def create_mapping(payload: CreateMappingIn, session_id: str = Depends(require_session)) -> CertificateOut:
+@router.post("/certificates", response_model=CertificateOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_session)])
+def create_mapping(payload: CreateMappingIn) -> CertificateOut:
     from app.services.sync import create_mapping as create_mapping_service
 
     meta = create_mapping_service(
@@ -141,7 +193,7 @@ def discover(session_id: str = Depends(require_session)) -> list[dict]:
         client.close()
 
 
-@router.post("/ca/init")
+@router.post("/ca/init", dependencies=[Depends(require_session)])
 def initialize_ca(
     common_name: str = Form("Local Docker Root CA"),
     valid_days: int = Form(825),
@@ -174,12 +226,11 @@ def _parse_sans(raw_sans: str) -> list[Identity]:
     return identities
 
 
-@router.post("/certificates/generate")
+@router.post("/certificates/generate", dependencies=[Depends(require_session)])
 def generate_certificate(
     common_name: str = Form(...),
     sans: str = Form(...),
     days: int = Form(825),
-    session_id: str = Depends(require_session),
 ) -> Response:
     if common_name is None or sans is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="common_name und sans sind Pflichtfelder")
