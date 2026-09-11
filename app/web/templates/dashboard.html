@@ -32,7 +32,7 @@
       <input type="text" name="common_name" value="Local Docker Root CA" required>
     </label>
     <label>Validity in days
-      <input type="number" name="valid_days" value="825" min="1" max="36500" required>
+      <input type="number" name="valid_days" value="3650" min="1" max="3650" required>
     </label>
     <div class="dialog-actions">
       <button type="submit">Generate Root CA</button>
@@ -47,17 +47,17 @@
   <form method="post" action="/api/certificates/generate" enctype="application/x-www-form-urlencoded">
     <h3>Generate new certificate with Root CA</h3>
     <label>Common Name
-      <input type="text" name="common_name" value="example.lan" required>
+      <input type="text" name="common_name" placeholder="example.lan" required>
     </label>
     <label>SANs (DNS / IP separated by comma)
-      <textarea name="sans" rows="4" required>example.lan, www.example.lan, 192.168.1.50</textarea>
+      <textarea name="sans" rows="4" placeholder="example.lan, www.example.lan, 192.168.1.50" required></textarea>
     </label>
     <label>Validity in days
-      <input type="number" name="days" value="825" min="1" max="3980" required>
+      <input type="number" name="days" value="825" min="1" max="825" required>
     </label>
     <div class="dialog-actions">
       <button type="submit">Generate & download</button>
-      <button type="button" onclick="document.getElementById('cert-dialog').close()">Cancel</button>
+      <button type="button" onclick="document.getElementById('cert-dialog').close()">Close</button>
     </div>
   </form>
 </dialog>
@@ -75,6 +75,13 @@
   At least one certificate has been renewed. Please restart or reload Nginx Proxy Manager once so the change takes effect.
   The Certificate Manager intentionally does not trigger an automatic reload for security and architecture reasons
   <strong>(see README)</strong>.
+</div>
+{% endif %}
+
+{% if ca_ready and ca_cert_info %}
+<div class="ca-info-box" aria-live="polite">
+  <strong>Current Root CA</strong>
+  <span>Issuer: {{ ca_cert_info.issuer }} • Expiry: {{ ca_cert_info.expiry }} • Subject: {{ ca_cert_info.subject }}</span>
 </div>
 {% endif %}
 
@@ -169,7 +176,7 @@
   <form hx-post="/api/certificates/{{ card.content.meta.local_id }}/renew" hx-target="body" hx-swap="none" onsubmit="setTimeout(() => location.reload(), 500)">
     <h3>Renew certificate</h3>
     <label>Validity in days
-      <input type="number" name="valid_days" value="825" min="1" max="3980" required>
+      <input type="number" name="valid_days" value="825" min="1" max="825" required>
     </label>
     <div class="dialog-actions">
       <button type="submit">Renew</button>

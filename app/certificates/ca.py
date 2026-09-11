@@ -30,6 +30,26 @@ class IssuedCertificate:
     cert_pem: bytes
 
 
+def read_certificate_details(cert_path: Path) -> dict[str, str] | None:
+    """Read subject, issuer and expiry metadata from a PEM certificate."""
+    if not cert_path.is_file():
+        return None
+
+    certificate = x509.load_pem_x509_certificate(cert_path.read_bytes())
+    try:
+        expiry = certificate.not_valid_after_utc
+    except AttributeError:
+        expiry = certificate.not_valid_after
+    if getattr(expiry, "tzinfo", None) is None:
+        expiry = expiry.replace(tzinfo=datetime.timezone.utc)
+
+    return {
+        "issuer": certificate.issuer.rfc4514_string(),
+        "expiry": expiry.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "subject": certificate.subject.rfc4514_string(),
+    }
+
+
 class CertificateAuthority:
     """Loads ca.key/ca.crt once and signs server certificates. Never expose
     ``_private_key`` outside this class.

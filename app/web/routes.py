@@ -12,6 +12,7 @@ from fastapi import APIRouter, Cookie, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from app.certificates.ca import read_certificate_details
 from app.config import settings
 from app.npm.errors import NpmAuthError, NpmConnectionError
 from app.services.renewal import remaining_days
@@ -54,6 +55,7 @@ def dashboard(
 
     certs = repo.list_certificates()
     ca_ready = settings.ca_key_path.exists() and settings.ca_cert_path.exists()
+    ca_cert_info = read_certificate_details(settings.ca_cert_path) if ca_ready else None
     rows = []
     any_reload_required = False
     for meta in certs:
@@ -90,6 +92,7 @@ def dashboard(
             "rows": rows,
             "any_reload_required": any_reload_required,
             "ca_ready": ca_ready,
+            "ca_cert_info": ca_cert_info,
             "unmapped": [
                 {
                     "id": cert.id,
